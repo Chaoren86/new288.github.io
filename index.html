@@ -186,9 +186,13 @@
             border: none;
             display: block;
             background: white;
-            overflow: visible;
+            overflow: auto;
             /* 确保 iframe 内容可以完整显示 */
             -webkit-overflow-scrolling: touch;
+            /* 微信浏览器优化 */
+            position: relative;
+            /* 确保内容可以滚动 */
+            overscroll-behavior: contain;
         }
         
         .loading {
@@ -373,6 +377,19 @@
             }
             
             .iframe-wrapper {
+                min-height: -webkit-fill-available;
+            }
+        }
+        
+        /* 微信浏览器和iOS特定优化 */
+        @supports (-webkit-touch-callout: none) {
+            .iframe-container {
+                height: -webkit-fill-available;
+                min-height: -webkit-fill-available;
+            }
+            
+            iframe {
+                height: -webkit-fill-available;
                 min-height: -webkit-fill-available;
             }
         }
@@ -1339,8 +1356,13 @@
                 // 监听iframe加载完成
                 iframe.addEventListener('load', function() {
                     console.log('iframe load 事件触发');
+                    const isWeChat = /micromessenger/i.test(navigator.userAgent);
+                    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+                                 (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+                    
                     // 更新高度，确保内容完整显示
                     updateIframeHeight();
+                    
                     // 延迟一点再隐藏，确保内容渲染完成
                     setTimeout(function() {
                         if (!errorDetected) {
@@ -1349,9 +1371,18 @@
                             updateIframeHeight();
                         }
                     }, 800);
+                    
                     // 延迟更新高度，等待内容完全渲染
                     setTimeout(updateIframeHeight, 1500);
                     setTimeout(updateIframeHeight, 3000);
+                    
+                    // 微信和iOS需要更多次更新
+                    if (isWeChat || isIOS) {
+                        setTimeout(updateIframeHeight, 500);
+                        setTimeout(updateIframeHeight, 1000);
+                        setTimeout(updateIframeHeight, 2000);
+                        setTimeout(updateIframeHeight, 4000);
+                    }
                 });
                 
                 // 监听iframe加载错误
@@ -1434,31 +1465,105 @@
             
             // 计算实际可用高度（考虑移动端浏览器工具栏）
             function getAvailableHeight() {
+                // 检测是否为微信浏览器
+                const isWeChat = /micromessenger/i.test(navigator.userAgent);
+                // 检测是否为iOS设备
+                const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+                             (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+                
+                // 微信浏览器和iOS的特殊处理
+                if (isWeChat || isIOS) {
+                    // 优先使用visualViewport（如果支持）
+                    if (window.visualViewport && window.visualViewport.height) {
+                        return window.visualViewport.height;
+                    }
+                    // iOS Safari的特殊处理：使用screen.height作为参考
+                    if (isIOS && window.screen && window.screen.height) {
+                        // 尝试多种方式获取准确高度
+                        const innerHeight = window.innerHeight || 0;
+                        const screenHeight = window.screen.height;
+                        const clientHeight = document.documentElement.clientHeight || 0;
+                        
+                        // 选择最大的有效高度值
+                        let height = Math.max(innerHeight, clientHeight);
+                        
+                        // 如果高度异常小（可能是工具栏影响），使用screen.height
+                        if (height < screenHeight * 0.5) {
+                            height = screenHeight;
+                        }
+                        
+                        // 确保高度合理（不超过屏幕高度）
+                        if (height > screenHeight) {
+                            height = screenHeight;
+                        }
+                        
+                        return height;
+                    }
+                }
+                
                 // 优先使用动态视口高度（考虑移动端浏览器工具栏）
                 if (window.visualViewport && window.visualViewport.height) {
                     return window.visualViewport.height;
                 }
+                
                 // 使用标准视口高度
                 const height = window.innerHeight || document.documentElement.clientHeight;
-                return height;
+                return height || window.screen.height || 800; // 默认值
             }
             
             // 更新iframe高度
             function updateIframeHeight() {
                 if (iframe && iframeWrapper) {
                     const availableHeight = getAvailableHeight();
+                    const isWeChat = /micromessenger/i.test(navigator.userAgent);
+                    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+                                 (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+                    
                     // 确保iframe使用完整的可用高度
                     iframeWrapper.style.height = availableHeight + 'px';
-                    iframe.style.height = '100%';
+                    iframeWrapper.style.minHeight = availableHeight + 'px';
+                    iframeWrapper.style.maxHeight = availableHeight + 'px';
+                    
+                    // iframe高度设置
+                    iframe.style.height = availableHeight + 'px';
                     iframe.style.minHeight = availableHeight + 'px';
+                    iframe.style.maxHeight = 'none'; // 允许内容超出时滚动
+                    
                     // 确保滚动相关样式不被覆盖
                     iframe.style.overflow = 'auto';
+                    iframe.style.overflowX = 'hidden';
+                    iframe.style.overflowY = 'auto';
                     iframe.style.webkitOverflowScrolling = 'touch';
+                    
+                    // 微信和iOS特殊处理：确保可以滚动
+                    if (isWeChat || isIOS) {
+                        // 移除可能阻止滚动的样式
+                        iframe.style.position = 'relative';
+                        iframe.style.display = 'block';
+                        // 确保iframe容器可以滚动
+                        iframeWrapper.style.overflow = 'hidden';
+                        const iframeContainer = document.querySelector('.iframe-container');
+                        if (iframeContainer) {
+                            iframeContainer.style.overflow = 'hidden';
+                            iframeContainer.style.height = availableHeight + 'px';
+                            iframeContainer.style.minHeight = availableHeight + 'px';
+                            iframeContainer.style.maxHeight = availableHeight + 'px';
+                        }
+                    }
+                    
                     // 确保容器也使用正确的高度
                     const container = document.querySelector('.container');
                     if (container) {
                         container.style.height = availableHeight + 'px';
                         container.style.maxHeight = availableHeight + 'px';
+                        container.style.minHeight = availableHeight + 'px';
+                    }
+                    
+                    // 强制重绘（微信浏览器可能需要）
+                    if (isWeChat) {
+                        iframe.style.display = 'none';
+                        iframe.offsetHeight; // 触发重排
+                        iframe.style.display = 'block';
                     }
                 }
             }
@@ -1482,16 +1587,51 @@
                 });
             }
             
+            // 微信浏览器特殊处理：监听orientationchange（屏幕旋转）
+            if (isWeChat) {
+                window.addEventListener('orientationchange', function() {
+                    setTimeout(updateIframeHeight, 300);
+                    setTimeout(updateIframeHeight, 600);
+                });
+                
+                // 微信浏览器可能需要更频繁的高度更新
+                let wechatHeightCheck = setInterval(function() {
+                    updateIframeHeight();
+                }, 2000);
+                
+                // 10秒后停止频繁检查
+                setTimeout(function() {
+                    if (wechatHeightCheck) {
+                        clearInterval(wechatHeightCheck);
+                    }
+                }, 10000);
+            }
+            
             // 页面加载完成后更新高度
             window.addEventListener('load', function() {
                 updateIframeHeight();
                 // 延迟再次更新，确保浏览器工具栏已完全显示/隐藏
                 setTimeout(updateIframeHeight, 300);
+                setTimeout(updateIframeHeight, 600);
                 setTimeout(updateIframeHeight, 1000);
+                // 微信浏览器需要更多次更新
+                if (isWeChat) {
+                    setTimeout(updateIframeHeight, 1500);
+                    setTimeout(updateIframeHeight, 2000);
+                }
             });
             
             // 初始高度设置
             updateIframeHeight();
+            
+            // DOMContentLoaded时也更新一次
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', function() {
+                    updateIframeHeight();
+                });
+            } else {
+                updateIframeHeight();
+            }
             
             // 检测是否支持iframe
             if (!iframe) {
